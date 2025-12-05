@@ -95,6 +95,7 @@ export interface Client {
   
   // Biometrics & Lifestyle
   gender?: string;
+  age?: string;
   height?: string;
   weight?: string;
   bodyType?: string;

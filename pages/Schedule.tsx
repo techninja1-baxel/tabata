@@ -22,14 +22,34 @@ interface ScheduleProps {
 
 const Schedule: React.FC<ScheduleProps> = ({ clients, onUpdateClient }) => {
   const navigate = useNavigate();
+  
+  // Helper function to get rounded time (next 30-minute interval)
+  const getRoundedTime = () => {
+    const now = new Date();
+    const minutes = now.getMinutes();
+    const roundedMinutes = minutes < 30 ? 30 : 60;
+    
+    if (roundedMinutes === 60) {
+      now.setHours(now.getHours() + 1);
+      now.setMinutes(0);
+    } else {
+      now.setMinutes(30);
+    }
+    
+    const hours = now.getHours().toString().padStart(2, '0');
+    const mins = now.getMinutes().toString().padStart(2, '0');
+    return `${hours}:${mins}`;
+  };
+  
   // UI State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ session: any; status: SessionStatus } | null>(null);
+  const [validationError, setValidationError] = useState('');
   
   // Form State
   const [selectedClientId, setSelectedClientId] = useState('');
   const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
-  const [newTime, setNewTime] = useState('09:00');
+  const [newTime, setNewTime] = useState(getRoundedTime());
   const [customTitle, setCustomTitle] = useState('');
   
   // Logic to get sorted upcoming sessions
@@ -73,7 +93,18 @@ const Schedule: React.FC<ScheduleProps> = ({ clients, onUpdateClient }) => {
 
   const handleAddSession = (e: React.FormEvent) => {
       e.preventDefault();
+      setValidationError('');
+      
       if (!selectedClientId) return;
+      
+      // Validate that the selected datetime is not in the past
+      const selectedDateTime = new Date(`${newDate}T${newTime}`);
+      const now = new Date();
+      
+      if (selectedDateTime <= now) {
+        setValidationError('Cannot schedule a session in the past. Please select a future date and time.');
+        return;
+      }
       
       const client = clients.find(c => c.id === selectedClientId);
       if(!client) return;
@@ -95,6 +126,9 @@ const Schedule: React.FC<ScheduleProps> = ({ clients, onUpdateClient }) => {
       setIsAddModalOpen(false);
       setSelectedClientId('');
       setCustomTitle('');
+      setNewDate(new Date().toISOString().split('T')[0]);
+      setNewTime(getRoundedTime());
+      setValidationError('');
   };
 
   // Grouping sessions by date
@@ -208,6 +242,12 @@ const Schedule: React.FC<ScheduleProps> = ({ clients, onUpdateClient }) => {
                  </div>
              ) : (
                 <form onSubmit={handleAddSession} className="flex-1 p-6 space-y-6">
+                    {validationError && (
+                      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm font-medium">
+                        {validationError}
+                      </div>
+                    )}
+                    
                     <div>
                         <label className="block text-sm font-bold text-slate-700 mb-2">Select Client</label>
                         <div className="grid grid-cols-2 gap-2">

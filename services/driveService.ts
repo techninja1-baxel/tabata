@@ -31,29 +31,96 @@ export const initializeGoogleServices = (onInitComplete: () => void) => {
     return;
   }
 
-  const gapiLoaded = () => {
-    window.gapi.load('client', async () => {
-      await window.gapi.client.init({
-        apiKey: GOOGLE_API_KEY,
-        discoveryDocs: DISCOVERY_DOCS,
+  try {
+    const gapiLoaded = () => {
+      if (!window.gapi) {
+        console.error('GAPI not loaded');
+        return;
+      }
+      window.gapi.load('client', async () => {
+        try {
+          // Initialize without discovery docs to avoid 502 errors
+          await window.gapi.client.init({
+            apiKey: GOOGLE_API_KEY,
+          });
+          
+          // Load Drive API directly without discovery docs
+          await window.gapi.client.load('drive', 'v3');
+          
+          gapiInited = true;
+          if (gisInited) onInitComplete();
+        } catch (error) {
+          console.error('Failed to initialize GAPI client:', error);
+          // Continue anyway - the app can still work with localStorage
+          gapiInited = true;
+          if (gisInited) onInitComplete();
+        }
       });
-      gapiInited = true;
-      if (gisInited) onInitComplete();
-    });
-  };
+    };
 
-  const gisLoaded = () => {
-    tokenClient = window.google.accounts.oauth2.initTokenClient({
-      client_id: GOOGLE_CLIENT_ID,
-      scope: SCOPES,
-      callback: '', // Defined at request time
-    });
-    gisInited = true;
-    if (gapiInited) onInitComplete();
-  };
+    const gisLoaded = () => {
+      if (!window.google) {
+        console.error('Google Identity Services not loaded');
+        return;
+      }
+      try {
+        tokenClient = window.google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_CLIENT_ID,
+          scope: SCOPES,
+          callback: '', // Defined at request time
+        });
+        gisInited = true;
+        if (gapiInited) onInitComplete();
+      } catch (error) {
+        console.error('Failed to initialize GIS:', error);
+      }
+    };
 
-  if (window.gapi) gapiLoaded();
-  if (window.google) gisLoaded();
+    if (window.gapi) gapiLoaded();
+    if (window.google) gisLoaded();
+  } catch (error) {
+    console.error('Error initializing Google Services:', error);
+    // Call onInitComplete anyway to not block the app
+    onInitComplete();
+  }
+};
+
+// Request Drive API access token (separate from Firebase Auth)
+export const requestDriveAccess = async (): Promise<string> => {
+  if (!ENABLE_GOOGLE_LOGIN) {
+    console.log('[Dev Mode] Skipping Drive Access');
+    return '';
+  }
+
+  if (!tokenClient) {
+    throw new Error('Google Identity Services not initialized');
+  }
+
+  return new Promise((resolve, reject) => {
+    tokenClient.callback = async (resp: any) => {
+      if (resp.error) {
+        reject(resp);
+        return;
+      }
+      
+      // Token acquired
+      const token = resp.access_token;
+      if (token) {
+        // Store token in gapi client
+        window.gapi.client.setToken({ access_token: token });
+        resolve(token);
+      } else {
+        reject(new Error('No access token received'));
+      }
+    };
+
+    // Request token
+    if (window.gapi.client.getToken() === null) {
+      tokenClient.requestAccessToken({ prompt: 'consent' });
+    } else {
+      tokenClient.requestAccessToken({ prompt: '' });
+    }
+  });
 };
 
 export const handleLogin = async (): Promise<UserProfile> => {

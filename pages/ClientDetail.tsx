@@ -56,6 +56,7 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onUpdateClient, onB
   const [wizardStep, setWizardStep] = useState(1);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false); // New state for custom confirm dialog
+  const [showBackConfirm, setShowBackConfirm] = useState(false); // Confirm dialog for back navigation during generation
   const [triviaIndex, setTriviaIndex] = useState(0);
   
   // Ref to track the current generation request ID for cancellation
@@ -77,6 +78,20 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onUpdateClient, onB
   // UI State for Plans
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
+
+  // Warn before page unload/refresh during generation
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isGenerating) {
+        e.preventDefault();
+        e.returnValue = 'Plan generation is in progress. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isGenerating]);
 
   // Trivia Rotation Effect
   useEffect(() => {
@@ -120,6 +135,7 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onUpdateClient, onB
   };
 
   const executeGeneration = async (replaceId?: string) => {
+    console.log('🚀 Starting generation - setting isGenerating to TRUE');
     setIsGenerating(true);
     setShowCancelConfirm(false);
     setShowReplaceUI(false); 
@@ -132,7 +148,7 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onUpdateClient, onB
     
     // Auto-inject stored client details
     const bioContext = `
-      Client Profile: ${client.gender || 'Not specified'}, Height: ${client.height || '?'}cm, Weight: ${client.weight || '?'}kg.
+      Client Profile: ${client.gender || 'Not specified'}, Age: ${client.age || '?'}, Height: ${client.height || '?'}cm, Weight: ${client.weight || '?'}kg.
       Body Type: ${client.bodyType || 'Not specified'}.
       Lifestyle: ${client.activityLevel || 'Moderate'} Activity, Sleeps ${client.sleepDuration || '?'}h.
       Diet: ${client.dietType || 'Standard'}.
@@ -162,9 +178,11 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onUpdateClient, onB
       // If the generationIdRef has changed (because user closed the modal or started a new one),
       // we discard this result.
       if (generationIdRef.current !== thisRunId) {
-        console.log('Generation cancelled or superseded. Discarding result.');
+        console.log('🚫 Generation cancelled or superseded. Discarding result.');
+        console.log('📊 thisRunId:', thisRunId, 'current generationIdRef:', generationIdRef.current);
         return;
       }
+      console.log('✅ Generation completed successfully, proceeding to save plan');
       
       const newPlan: TrainingPlan = {
         id: crypto.randomUUID(),
@@ -226,6 +244,7 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onUpdateClient, onB
   const openEditProfile = () => {
     setEditForm({
       gender: client.gender || 'Male',
+      age: client.age || '',
       height: client.height || '',
       weight: client.weight || '',
       bodyType: client.bodyType || 'Mesomorph',
@@ -267,6 +286,31 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onUpdateClient, onB
      generationIdRef.current += 1; 
   };
 
+  // Handle back button with generation check
+  const handleBack = () => {
+    console.log('🔙 Back button clicked. isGenerating:', isGenerating);
+    if (isGenerating) {
+      console.log('⚠️ Generation in progress - showing confirmation dialog');
+      setShowBackConfirm(true);
+    } else {
+      console.log('✅ No generation in progress - navigating back');
+      onBack();
+    }
+  };
+
+  // Confirm back navigation and cancel generation
+  const handleConfirmBack = () => {
+    console.log('✅ User confirmed back navigation - cancelling generation');
+    console.log('📊 Before cancel - generationIdRef:', generationIdRef.current);
+    
+    setIsGenerating(false);
+    generationIdRef.current += 1;
+    
+    console.log('📊 After cancel - generationIdRef:', generationIdRef.current);
+    setShowBackConfirm(false);
+    onBack();
+  };
+
   // --- UI Components ---
 
   const renderEditProfileModal = () => {
@@ -293,6 +337,10 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onUpdateClient, onB
                           {g}
                         </button>
                       ))}
+                    </div>
+                    <div className="mb-4">
+                      <label className="text-xs font-bold text-slate-500 mb-1 block">Age</label>
+                      <input type="number" value={editForm.age} onChange={e=>setEditForm({...editForm, age: e.target.value})} min="1" max="120" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-center font-bold outline-none focus:border-emerald-500" />
                     </div>
                     <div className="flex gap-4 mb-4">
                         <div className="flex-1">
@@ -639,9 +687,38 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onUpdateClient, onB
       {renderWizard()}
       {renderEditProfileModal()}
 
+      {/* Back Confirmation Dialog */}
+      {showBackConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-center w-12 h-12 rounded-full bg-amber-100 mx-auto mb-4">
+              <AlertTriangle className="text-amber-600" size={24} />
+            </div>
+            <h3 className="text-xl font-bold text-slate-800 text-center mb-2">Plan Generation in Progress</h3>
+            <p className="text-slate-600 text-center mb-6">
+              A training plan is currently being generated. Going back will cancel this process and you'll lose the generated plan.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowBackConfirm(false)}
+                className="flex-1 py-3 px-4 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-colors"
+              >
+                Stay
+              </button>
+              <button
+                onClick={handleConfirmBack}
+                className="flex-1 py-3 px-4 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-colors"
+              >
+                Go Back
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header Profile Card */}
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 mb-6 relative">
-          <button onClick={onBack} className="absolute top-5 left-5 text-slate-400 p-2 hover:bg-slate-50 rounded-full">
+          <button onClick={handleBack} className="absolute top-5 left-5 text-slate-400 p-2 hover:bg-slate-50 rounded-full">
               <ArrowLeft size={24} />
           </button>
           
@@ -657,6 +734,7 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onUpdateClient, onB
               <h2 className="text-2xl font-bold text-slate-800">{client.name}</h2>
               <div className="flex flex-wrap justify-center gap-1 text-xs text-slate-500 mb-4 mt-1">
                  {client.gender && <span>{client.gender} • </span>}
+                 {client.age && <span>{client.age} yrs • </span>}
                  {client.trainingDays && <span>{client.trainingDays}d/wk • </span>}
                  {client.bodyType && <span>{client.bodyType}</span>}
               </div>

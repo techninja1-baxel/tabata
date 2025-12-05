@@ -19,9 +19,11 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, onSave }) => {
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newSessions, setNewSessions] = useState(10);
+  const [validationError, setValidationError] = useState('');
   
   // Bio
-  const [newGender, setNewGender] = useState('Male');
+  const [newGender, setNewGender] = useState('');
+  const [newAge, setNewAge] = useState('');
   const [newHeight, setNewHeight] = useState('');
   const [newWeight, setNewWeight] = useState('');
   const [newBodyType, setNewBodyType] = useState('Mesomorph');
@@ -40,7 +42,8 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, onSave }) => {
     setNewName('');
     setNewPhone('');
     setNewSessions(10);
-    setNewGender('Male');
+    setNewGender('');
+    setNewAge('');
     setNewHeight('');
     setNewWeight('');
     setNewBodyType('Mesomorph');
@@ -49,19 +52,53 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, onSave }) => {
     setNewDiet('Standard');
     setNewDays('3');
     setStep(1);
+    setValidationError('');
     setIsModalOpen(false);
   }
 
   const handleAddClient = (e: React.FormEvent) => {
     e.preventDefault();
-    if (step < 3) {
-        setStep(step + 1);
+    setValidationError('');
+    
+    // Step 1 validations
+    if (step === 1) {
+      if (newName.trim().length < 3) {
+        setValidationError('Name must be at least 3 characters');
         return;
+      }
+      if (newPhone && !(/^\d{10}$/.test(newPhone.replace(/\D/g, '')))) {
+        setValidationError('Phone number must be exactly 10 digits');
+        return;
+      }
+      setStep(2);
+      return;
+    }
+    
+    // Step 2 validations
+    if (step === 2) {
+      if (!newGender) {
+        setValidationError('Please select a gender');
+        return;
+      }
+      if (!newAge || Number(newAge) <= 0 || Number(newAge) > 120) {
+        setValidationError('Please enter a valid age (1-120)');
+        return;
+      }
+      if (!newHeight || Number(newHeight) <= 0) {
+        setValidationError('Please enter a valid height');
+        return;
+      }
+      if (!newWeight || Number(newWeight) <= 0) {
+        setValidationError('Please enter a valid weight');
+        return;
+      }
+      setStep(3);
+      return;
     }
 
     const newClient: Client = {
       id: crypto.randomUUID(),
-      name: newName,
+      name: newName.trim(),
       email: '', 
       phone: newPhone,
       sessionsTotal: Number(newSessions),
@@ -74,6 +111,7 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, onSave }) => {
       joinedAt: new Date().toISOString(),
       // Bio & Lifestyle
       gender: newGender,
+      age: newAge,
       height: newHeight,
       weight: newWeight,
       bodyType: newBodyType,
@@ -174,31 +212,44 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, onSave }) => {
            </div>
            
            <form onSubmit={handleAddClient} className="flex-1 overflow-y-auto p-6 space-y-6">
+              {validationError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm font-medium">
+                  {validationError}
+                </div>
+              )}
               
               {/* STEP 1: BASIC INFO */}
               {step === 1 && (
                   <div className="space-y-6 animate-in slide-in-from-right duration-300">
                       <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-2">Full Name</label>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">Full Name *</label>
                         <input 
                           required
                           autoFocus
                           type="text" 
+                          minLength={3}
                           className="w-full p-4 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-lg"
                           value={newName}
                           onChange={e => setNewName(e.target.value)}
                           placeholder="e.g. John Doe"
                         />
+                        {newName.length > 0 && newName.length < 3 && (
+                          <p className="text-xs text-red-500 mt-1">Name must be at least 3 characters</p>
+                        )}
                       </div>
                       <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-2">Phone Number</label>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">Phone Number (Optional)</label>
                         <input 
                           type="tel" 
                           className="w-full p-4 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-lg"
                           value={newPhone}
                           onChange={e => setNewPhone(e.target.value)}
-                          placeholder="Mobile number"
+                          placeholder="10 digits (e.g. 9876543210)"
+                          maxLength={10}
                         />
+                        {newPhone && !(/^\d{10}$/.test(newPhone.replace(/\D/g, ''))) && (
+                          <p className="text-xs text-red-500 mt-1">Phone number must be exactly 10 digits</p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-sm font-bold text-slate-700 mb-2">Session Pack</label>
@@ -233,28 +284,47 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, onSave }) => {
               {/* STEP 2: BIOMETRICS */}
               {step === 2 && (
                   <div className="space-y-6 animate-in slide-in-from-right duration-300">
-                      <div className="flex p-1 bg-slate-100 rounded-xl">
-                        {['Male', 'Female', 'Other'].map(g => (
-                          <button
-                            key={g}
-                            type="button"
-                            onClick={() => setNewGender(g)}
-                            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
-                              newGender === g ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'
-                            }`}
-                          >
-                            {g}
-                          </button>
-                        ))}
+                      <div>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">Gender *</label>
+                        <div className="flex p-1 bg-slate-100 rounded-xl">
+                          {['Male', 'Female', 'Other'].map(g => (
+                            <button
+                              key={g}
+                              type="button"
+                              onClick={() => setNewGender(g)}
+                              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
+                                newGender === g ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'
+                              }`}
+                            >
+                              {g}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">Age *</label>
+                        <input 
+                          required
+                          type="number" 
+                          min="1"
+                          max="120"
+                          className="w-full p-4 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-lg"
+                          placeholder="e.g. 25"
+                          value={newAge}
+                          onChange={e => setNewAge(e.target.value)}
+                        />
                       </div>
 
                       <div className="flex gap-4">
                         <div className="flex-1">
                           <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center">
-                            <Ruler size={12} className="mr-1"/> Height (cm)
+                            <Ruler size={12} className="mr-1"/> Height (cm) *
                           </label>
                           <input 
+                            required
                             type="number" 
+                            min="1"
                             className="w-full p-3 bg-white border border-slate-200 rounded-xl text-center font-bold outline-none focus:border-emerald-500"
                             placeholder="175"
                             value={newHeight}
@@ -263,10 +333,12 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, onSave }) => {
                         </div>
                         <div className="flex-1">
                           <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center">
-                            <Scale size={12} className="mr-1"/> Weight (kg)
+                            <Scale size={12} className="mr-1"/> Weight (kg) *
                           </label>
                           <input 
+                            required
                             type="number" 
+                            min="1"
                             className="w-full p-3 bg-white border border-slate-200 rounded-xl text-center font-bold outline-none focus:border-emerald-500"
                             placeholder="70"
                             value={newWeight}

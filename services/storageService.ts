@@ -39,10 +39,20 @@ export const StorageService = {
       try {
         console.log('📥 Loading data from Google Drive...');
         const driveData = await loadFromDrive();
-        if (driveData) {
-          // Compare timestamps - use newer data
+        if (driveData && driveData.clients) {
+          // Compare timestamps - use newer data, but be defensive
           const driveTimestamp = new Date(driveData.lastUpdated).getTime();
           const localTimestamp = localStorage.getItem(STORAGE_KEY_SYNCED);
+          
+          // If localStorage is empty but Drive has data, always use Drive
+          if (localClients.length === 0 && driveData.clients.length > 0) {
+            console.log('📥 localStorage empty, using Drive data');
+            localStorage.setItem(STORAGE_KEY_CLIENTS, JSON.stringify(driveData.clients));
+            localStorage.setItem(STORAGE_KEY_SYNCED, new Date().toISOString());
+            const totalNotes = driveData.clients.reduce((sum: number, c: Client) => sum + (c.progressNotes?.length || 0), 0);
+            console.log('✅ Loaded from Drive. Clients:', driveData.clients.length, 'Total notes:', totalNotes);
+            return driveData.clients;
+          }
           
           if (localTimestamp) {
             const localTime = new Date(localTimestamp).getTime();
@@ -77,6 +87,14 @@ export const StorageService = {
     // Always save to localStorage first (immediate)
     const totalNotes = clients.reduce((sum, c) => sum + (c.progressNotes?.length || 0), 0);
     console.log('💾 Saving clients. Total notes across all clients:', totalNotes);
+    
+    // Safeguard: Don't save empty array if we haven't properly loaded data yet
+    const hasLoadedBefore = localStorage.getItem(STORAGE_KEY_CLIENTS) !== null;
+    if (clients.length === 0 && !hasLoadedBefore) {
+      console.warn('⚠️ Preventing save of empty array - no previous data loaded');
+      return;
+    }
+    
     localStorage.setItem(STORAGE_KEY_CLIENTS, JSON.stringify(clients));
 
     // Then sync to Drive (background)

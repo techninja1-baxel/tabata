@@ -45,23 +45,31 @@ const App: React.FC = () => {
 
   // Initialize storage service and load data when user signs in
   useEffect(() => {
-    if (user) {
-      // Initialize storage service (will check localStorage for stored token)
+    if (user && accessToken) {
+      // Re-initialize storage service when token changes
       StorageService.initialize(accessToken);
-      
-      // Load data from localStorage/Drive
-      StorageService.loadClients().then((loadedClients) => {
-        setClients(loadedClients);
-        console.log(`✅ Loaded ${loadedClients.length} clients`);
-      });
     }
-  }, [user]);
+  }, [user, accessToken]);
 
   // Listen for Firebase auth state changes
   useEffect(() => {
     if (ENABLE_GOOGLE_LOGIN) {
       const unsubscribe = onAuthChange(async (firebaseUser) => {
         if (firebaseUser) {
+          // Load stored access token FIRST
+          const storedToken = localStorage.getItem('fittrack_access_token');
+          
+          // If no token in localStorage (incognito/new session), we need to wait for explicit login
+          // Don't auto-restore session without Drive access token
+          if (!storedToken) {
+            console.log('⚠️ No access token found - user needs to sign in again');
+            setUser(null);
+            setClients([]);
+            setAccessToken(null);
+            setIsAuthLoading(false);
+            return;
+          }
+          
           const userProfile: UserProfile = {
             name: firebaseUser.displayName || 'User',
             email: firebaseUser.email || '',
@@ -76,14 +84,19 @@ const App: React.FC = () => {
             userProfile.promoCode = storedUser.promoCode;
           }
           
+          // Initialize storage with token
+          setAccessToken(storedToken);
+          StorageService.initialize(storedToken);
+          
+          // Load data from Drive/localStorage
+          console.log('🔄 Restoring session - loading data...');
+          const loadedClients = await StorageService.loadClients();
+          console.log(`✅ Session restored with ${loadedClients.length} clients`);
+          
+          // Now set user and clients
+          setClients(loadedClients);
           setUser(userProfile);
           StorageService.setCurrentUser(userProfile);
-          
-          // Load stored access token and initialize storage
-          const storedToken = localStorage.getItem('fittrack_access_token');
-          if (storedToken) {
-            setAccessToken(storedToken);
-          }
         } else {
           setUser(null);
           setClients([]);
@@ -198,14 +211,25 @@ const App: React.FC = () => {
     try {
       setAuthError(null);
       const { userProfile, accessToken: token } = await signInWithGoogle();
+      
+      // Store access token for Drive operations FIRST
+      if (token) {
+        localStorage.setItem('fittrack_access_token', token);
+      }
+      
+      // Initialize storage with token BEFORE setting user
+      StorageService.initialize(token);
+      
+      // Load data from Drive/localStorage BEFORE setting user state
+      console.log('🔄 Loading user data before login completion...');
+      const loadedClients = await StorageService.loadClients();
+      console.log(`✅ Loaded ${loadedClients.length} clients from storage`);
+      
+      // Now set state - this will trigger UI to show
       setAccessToken(token);
+      setClients(loadedClients);
       setUser(userProfile);
       StorageService.setCurrentUser(userProfile);
-      
-      // Initialize and load data
-      StorageService.initialize(token);
-      const loadedClients = await StorageService.loadClients();
-      setClients(loadedClients);
       
       logUsageStats('User Logged In');
     } catch (err: any) {
@@ -213,6 +237,8 @@ const App: React.FC = () => {
       setAuthError("Login failed. Please check your popup blockers and try again.");
     }
   };
+
+
 
   const onLogout = async () => {
     try {
@@ -224,6 +250,9 @@ const App: React.FC = () => {
         await new Promise(resolve => setTimeout(resolve, 1000));
         console.log('✅ Data saved successfully');
       }
+      
+      // Clear access token
+      localStorage.removeItem('fittrack_access_token');
       
       await signOut();
       setUser(null);
@@ -251,16 +280,52 @@ const App: React.FC = () => {
 
   // Login Screen
   if (!user) {
+    // In developer mode, show simple dev login
+    if (!ENABLE_GOOGLE_LOGIN) {
+      return (
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center">
+            <div className="mb-6 flex justify-center">
+               <div className="p-4 rounded-full bg-amber-100">
+                  <Code2 className="text-amber-600" size={32} />
+               </div>
+            </div>
+            <h1 className="text-4xl font-black text-slate-900 mb-2 italic tracking-tighter">Tabata</h1>
+            <p className="text-slate-500 mb-8 font-medium">Professional Client Management</p>
+            
+            <button 
+                onClick={onGoogleLogin}
+                className="w-full flex items-center justify-center gap-3 px-6 py-3 border rounded-lg transition-colors font-medium group bg-amber-100 border-amber-200 text-amber-900 hover:bg-amber-200"
+            >
+                <Code2 size={20} />
+                Enter Developer Mode
+            </button>
+
+            {authError && (
+                <p className="text-sm text-red-500 mt-4 font-medium">{authError}</p>
+            )}
+            
+            <div className="mt-8 pt-6 border-t border-slate-100">
+               <div className="flex items-center justify-center text-xs text-slate-400 gap-2 mb-2">
+                   <Cloud size={14} />
+                   <span>Local Development Storage</span>
+               </div>
+               <p className="text-[10px] text-slate-400 leading-relaxed">
+                  Developer Mode enabled: Data is stored in your browser's LocalStorage and will not sync across devices.
+               </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Production mode - show Google login
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center">
           <div className="mb-6 flex justify-center">
-             <div className={`p-4 rounded-full ${ENABLE_GOOGLE_LOGIN ? 'bg-emerald-100' : 'bg-amber-100'}`}>
-                {ENABLE_GOOGLE_LOGIN ? (
-                  <Lock className="text-emerald-600" size={32} />
-                ) : (
-                  <Code2 className="text-amber-600" size={32} />
-                )}
+             <div className="p-4 rounded-full bg-emerald-100">
+                <Lock className="text-emerald-600" size={32} />
              </div>
           </div>
           <h1 className="text-4xl font-black text-slate-900 mb-2 italic tracking-tighter">Tabata</h1>
@@ -268,23 +333,10 @@ const App: React.FC = () => {
           
           <button 
               onClick={onGoogleLogin}
-              className={`w-full flex items-center justify-center gap-3 px-6 py-3 border rounded-lg transition-colors font-medium group ${
-                  ENABLE_GOOGLE_LOGIN 
-                  ? 'border-slate-300 hover:bg-slate-50 text-slate-700' 
-                  : 'bg-amber-100 border-amber-200 text-amber-900 hover:bg-amber-200'
-              }`}
+              className="w-full flex items-center justify-center gap-3 px-6 py-3 border rounded-lg transition-colors font-medium group border-slate-300 hover:bg-slate-50 text-slate-700"
           >
-              {ENABLE_GOOGLE_LOGIN ? (
-                  <>
-                      <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google" className="w-5 h-5" />
-                      Sign in with Google
-                  </>
-              ) : (
-                  <>
-                      <Code2 size={20} />
-                      Enter Developer Mode
-                  </>
-              )}
+              <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google" className="w-5 h-5" />
+              Sign in with Google
           </button>
 
           {authError && (
@@ -294,13 +346,10 @@ const App: React.FC = () => {
           <div className="mt-8 pt-6 border-t border-slate-100">
              <div className="flex items-center justify-center text-xs text-slate-400 gap-2 mb-2">
                  <Cloud size={14} />
-                 <span>{ENABLE_GOOGLE_LOGIN ? 'Secure Cloud Sync' : 'Local Development Storage'}</span>
+                 <span>Secure Cloud Sync</span>
              </div>
              <p className="text-[10px] text-slate-400 leading-relaxed">
-                {ENABLE_GOOGLE_LOGIN 
-                 ? "By signing in, Tabata will create a secure file in your Google Drive to store your clients and plans. We do not have access to your other files."
-                 : "Developer Mode enabled: Data is stored in your browser's LocalStorage and will not sync across devices."
-                }
+                By signing in, Tabata will create a secure file in your Google Drive to store your clients and plans. We do not have access to your other files.
              </p>
           </div>
         </div>
