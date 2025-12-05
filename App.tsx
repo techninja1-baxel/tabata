@@ -9,7 +9,7 @@ import Subscription from './pages/Subscription';
 import FutureFeatures from './pages/FutureFeatures';
 import Help from './pages/Help';
 import { Client, UserProfile, ClientSession } from './types';
-import { signInWithGoogle, signOut, onAuthChange } from './services/firebaseService';
+import { signInWithGoogle, signOut, onAuthChange, handleRedirectResult } from './services/firebaseService';
 import { StorageService, logUsageStats } from './services/storageService';
 import { Lock, Cloud, Loader2, Code2 } from 'lucide-react';
 import { ENABLE_GOOGLE_LOGIN } from './config';
@@ -50,6 +50,37 @@ const App: React.FC = () => {
       StorageService.initialize(accessToken);
     }
   }, [user, accessToken]);
+
+  // Check for redirect result on page load
+  useEffect(() => {
+    if (ENABLE_GOOGLE_LOGIN) {
+      handleRedirectResult().then((result) => {
+        if (result) {
+          console.log('✅ Sign-in redirect completed successfully');
+          const { userProfile, accessToken: token } = result;
+          
+          // Store access token for Drive operations
+          if (token) {
+            localStorage.setItem('fittrack_access_token', token);
+          }
+          
+          // Initialize storage and load data
+          StorageService.initialize(token);
+          StorageService.loadClients().then((loadedClients) => {
+            setAccessToken(token);
+            setClients(loadedClients);
+            setUser(userProfile);
+            StorageService.setCurrentUser(userProfile);
+            setIsAuthLoading(false);
+          });
+        }
+      }).catch((error) => {
+        console.error('Redirect result error:', error);
+        setAuthError(error.message);
+        setIsAuthLoading(false);
+      });
+    }
+  }, []);
 
   // Listen for Firebase auth state changes
   useEffect(() => {
@@ -234,7 +265,12 @@ const App: React.FC = () => {
       logUsageStats('User Logged In');
     } catch (err: any) {
       console.error(err);
-      setAuthError("Login failed. Please check your popup blockers and try again.");
+      // Show different message if it's a redirect
+      if (err.message?.includes('Redirecting')) {
+        setAuthError("Redirecting to Google sign-in...");
+      } else {
+        setAuthError("Login failed. If you're on mobile or popups are blocked, the page will redirect automatically.");
+      }
     }
   };
 
