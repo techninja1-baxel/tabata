@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Client } from '../types';
 import { Search, Plus, X, User, Ruler, Scale, Activity, Moon, Utensils, Calendar } from 'lucide-react';
 
 interface ClientsProps {
   clients: Client[];
   setClients: (clients: Client[]) => void;
-  onSelectClient: (id: string) => void;
   onSave: (clients: Client[]) => void;
 }
 
-const Clients: React.FC<ClientsProps> = ({ clients, setClients, onSelectClient, onSave }) => {
+const Clients: React.FC<ClientsProps> = ({ clients, setClients, onSave }) => {
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   
@@ -114,7 +115,7 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, onSelectClient, 
              return (
                  <div 
                     key={client.id}
-                    onClick={() => onSelectClient(client.id)}
+                    onClick={() => navigate(`/clients/${client.id}`)}
                     className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm active:scale-[0.98] transition-transform"
                  >
                      <div className="flex items-center justify-between mb-3">

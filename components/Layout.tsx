@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   Users, 
@@ -14,44 +15,56 @@ import {
 
 interface LayoutProps {
   children: React.ReactNode;
-  currentPage: string;
-  onNavigate: (page: string) => void;
   onLogout: () => void;
   userEmail?: string;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children, currentPage, onNavigate, onLogout, userEmail }) => {
+const Layout: React.FC<LayoutProps> = ({ children, onLogout, userEmail }) => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const currentPath = location.pathname;
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const [isLoggingOut, setIsLoggingOut] = React.useState(false);
 
   const mainTabs = [
-    { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
-    { id: 'schedule', label: 'Schedule', icon: Calendar },
-    { id: 'clients', label: 'Clients', icon: Users },
+    { id: '/dashboard', label: 'Home', icon: LayoutDashboard },
+    { id: '/schedule', label: 'Schedule', icon: Calendar },
+    { id: '/clients', label: 'Clients', icon: Users },
   ];
 
   const menuItems = [
     // Subscription disabled
-    { id: 'future', label: 'Labs (Beta)', icon: Dumbbell },
-    { id: 'help', label: 'Help & Bugs', icon: HelpCircle },
+    { id: '/future', label: 'Labs (Beta)', icon: Dumbbell },
+    { id: '/help', label: 'Help & Bugs', icon: HelpCircle },
   ];
 
-  const handleMenuNavigate = (id: string) => {
-    onNavigate(id);
+  const handleMenuNavigate = (path: string) => {
+    navigate(path);
     setIsMenuOpen(false);
   };
 
   const getPageTitle = () => {
-    if (currentPage.startsWith('client/')) return 'Client Profile';
-    switch (currentPage) {
-      case 'dashboard': return 'Tabata';
-      case 'schedule': return 'My Schedule';
-      case 'clients': return 'Clients';
-      case 'subscription': return 'Subscription';
-      case 'future': return 'Labs';
-      case 'help': return 'Support';
+    if (currentPath.startsWith('/clients/')) return 'Client Profile';
+    switch (currentPath) {
+      case '/':
+      case '/dashboard': return 'Tabata';
+      case '/schedule': return 'My Schedule';
+      case '/clients': return 'Clients';
+      case '/subscription': return 'Subscription';
+      case '/future': return 'Labs';
+      case '/help': return 'Support';
       default: return 'Tabata';
     }
+  };
+
+  const isTabActive = (tabPath: string) => {
+    if (tabPath === '/dashboard') {
+      return currentPath === '/' || currentPath === '/dashboard';
+    }
+    if (tabPath === '/clients') {
+      return currentPath.startsWith('/clients');
+    }
+    return currentPath === tabPath;
   };
 
   return (
@@ -76,11 +89,11 @@ const Layout: React.FC<LayoutProps> = ({ children, currentPage, onNavigate, onLo
         <div className="flex justify-around items-center h-16">
           {mainTabs.map((tab) => {
             const Icon = tab.icon;
-            const isActive = currentPage === tab.id;
+            const isActive = isTabActive(tab.id);
             return (
               <button
                 key={tab.id}
-                onClick={() => onNavigate(tab.id)}
+                onClick={() => navigate(tab.id)}
                 className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${
                   isActive ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'
                 }`}

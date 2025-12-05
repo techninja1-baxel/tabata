@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Client } from '../types';
 import { 
   Users, 
@@ -11,10 +12,10 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } 
 
 interface DashboardProps {
   clients: Client[];
-  onNavigate: (page: string) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ clients, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ clients }) => {
+  const navigate = useNavigate();
   const activeClients = clients.length;
   const criticalClients = clients.filter(c => (c.sessionsTotal - c.sessionsUsed) <= 1);
   const totalSessionsCompleted = clients.reduce((acc, c) => acc + c.sessionsUsed, 0);
@@ -50,7 +51,7 @@ const Dashboard: React.FC<DashboardProps> = ({ clients, onNavigate }) => {
                      <div key={client.id} className="flex justify-between items-center bg-white p-3 rounded-xl border border-red-100 shadow-sm">
                          <span className="font-medium text-slate-700">{client.name}</span>
                          <button 
-                            onClick={() => onNavigate(`client/${client.id}`)}
+                            onClick={() => navigate(`/clients/${client.id}`)}
                             className="text-xs font-bold bg-red-100 text-red-600 px-3 py-1.5 rounded-full"
                          >
                             Renew
@@ -128,14 +129,14 @@ const Dashboard: React.FC<DashboardProps> = ({ clients, onNavigate }) => {
       {/* Quick Links */}
       <div className="space-y-2">
           <button 
-            onClick={() => onNavigate('clients')}
+            onClick={() => navigate('/clients')}
             className="w-full bg-emerald-600 text-white p-4 rounded-2xl shadow-lg shadow-emerald-200 flex justify-between items-center font-medium active:scale-[0.98] transition-all"
           >
               <span>Manage Clients</span>
               <ChevronRight size={20} />
           </button>
           <button 
-            onClick={() => onNavigate('schedule')}
+            onClick={() => navigate('/schedule')}
             className="w-full bg-white text-slate-700 border border-slate-200 p-4 rounded-2xl shadow-sm flex justify-between items-center font-medium active:scale-[0.98] transition-all"
           >
               <span>View Schedule</span>

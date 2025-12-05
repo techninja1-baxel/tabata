@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Client, SessionStatus, ScheduledSession, WorkoutExercise } from '../types';
 import { 
   Plus, 
@@ -17,10 +18,10 @@ import {
 interface ScheduleProps {
   clients: Client[];
   onUpdateClient: (client: Client) => void;
-  onNavigate: (page: string) => void;
 }
 
-const Schedule: React.FC<ScheduleProps> = ({ clients, onUpdateClient, onNavigate }) => {
+const Schedule: React.FC<ScheduleProps> = ({ clients, onUpdateClient }) => {
+  const navigate = useNavigate();
   // UI State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ session: any; status: SessionStatus } | null>(null);
@@ -199,7 +200,7 @@ const Schedule: React.FC<ScheduleProps> = ({ clients, onUpdateClient, onNavigate
                         You need to add a client before you can schedule a session.
                     </p>
                     <button 
-                        onClick={() => onNavigate('clients')}
+                        onClick={() => navigate('/clients')}
                         className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold text-lg shadow-lg shadow-emerald-200"
                     >
                         Go to Clients

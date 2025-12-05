@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Clients from './pages/Clients';
@@ -13,12 +14,29 @@ import { StorageService, logUsageStats } from './services/storageService';
 import { Lock, Cloud, Loader2, Code2 } from 'lucide-react';
 import { ENABLE_GOOGLE_LOGIN } from './config';
 
+// Wrapper component for ClientDetail that uses URL params
+const ClientDetailWrapper: React.FC<{ clients: Client[]; onUpdateClient: (client: Client) => void }> = ({ clients, onUpdateClient }) => {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const client = clients.find(c => c.id === id);
+  
+  if (!client) {
+    return <div className="p-8 text-center text-white">Client not found</div>;
+  }
+  
+  return (
+    <ClientDetail 
+      client={client} 
+      onUpdateClient={onUpdateClient}
+      onBack={() => navigate('/clients')} 
+    />
+  );
+};
+
 const App: React.FC = () => {
   // Global State
   const [user, setUser] = useState<UserProfile | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
-  const [currentPage, setCurrentPage] = useState('dashboard');
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   
   // Auth State
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -211,7 +229,6 @@ const App: React.FC = () => {
       setUser(null);
       setClients([]);
       setAccessToken(null);
-      setCurrentPage('dashboard');
       StorageService.setCurrentUser(null);
     } catch (err: any) {
       console.error(err);
@@ -293,75 +310,44 @@ const App: React.FC = () => {
 
   // --- Main App Logic ---
 
-  const renderContent = () => {
-    // 1. Client Detail View (Special Case)
-    if (currentPage.startsWith('client/') || selectedClientId) {
-      const id = selectedClientId || currentPage.split('/')[1];
-      const client = clients.find(c => c.id === id);
-      if (client) {
-        return (
-          <ClientDetail 
-            client={client} 
-            onUpdateClient={(updated) => {
-               const newClients = clients.map(c => c.id === updated.id ? updated : c);
-               handleUpdateClients(newClients);
-            }}
-            onBack={() => {
-              setSelectedClientId(null);
-              setCurrentPage('clients');
-            }} 
-          />
-        );
-      }
-    }
-
-    // 2. Main Pages
-    switch (currentPage) {
-      case 'dashboard':
-        return <Dashboard clients={clients} onNavigate={(p) => setCurrentPage(p)} />;
-      case 'clients':
-        return (
-          <Clients 
-            clients={clients} 
-            setClients={handleUpdateClients} 
-            onSave={handleUpdateClients}
-            onSelectClient={(id) => setSelectedClientId(id)}
-          />
-        );
-      case 'schedule':
-        return (
-            <Schedule 
-                clients={clients} 
-                onUpdateClient={(updated) => {
-                    const newClients = clients.map(c => c.id === updated.id ? updated : c);
-                    handleUpdateClients(newClients);
-                }}
-                onNavigate={(page) => setCurrentPage(page)}
-            />
-        );
-      case 'subscription':
-        return user ? <Subscription user={user} onUpdateUser={handleUpdateUser} /> : null;
-      case 'future':
-        return <FutureFeatures />;
-      case 'help':
-        return <Help />;
-      default:
-        return <Dashboard clients={clients} onNavigate={(p) => setCurrentPage(p)} />;
-    }
+  const handleUpdateClient = (updated: Client) => {
+    const newClients = clients.map(c => c.id === updated.id ? updated : c);
+    handleUpdateClients(newClients);
   };
 
   return (
-    <Layout 
-      currentPage={selectedClientId ? 'clients' : currentPage} 
-      onNavigate={(page) => {
-        setCurrentPage(page);
-        setSelectedClientId(null);
-      }}
-      onLogout={onLogout}
-      userEmail={user.email}
-    >
-      {renderContent()}
-    </Layout>
+    <BrowserRouter>
+      <Layout onLogout={onLogout} userEmail={user.email}>
+        <Routes>
+          <Route path="/" element={<Dashboard clients={clients} />} />
+          <Route path="/dashboard" element={<Dashboard clients={clients} />} />
+          <Route path="/schedule" element={
+            <Schedule 
+              clients={clients} 
+              onUpdateClient={handleUpdateClient}
+            />
+          } />
+          <Route path="/clients" element={
+            <Clients 
+              clients={clients} 
+              setClients={handleUpdateClients} 
+              onSave={handleUpdateClients}
+            />
+          } />
+          <Route path="/clients/:id" element={
+            <ClientDetailWrapper 
+              clients={clients}
+              onUpdateClient={handleUpdateClient}
+            />
+          } />
+          <Route path="/subscription" element={
+            user ? <Subscription user={user} onUpdateUser={handleUpdateUser} /> : <div>Loading...</div>
+          } />
+          <Route path="/future" element={<FutureFeatures />} />
+          <Route path="/help" element={<Help />} />
+        </Routes>
+      </Layout>
+    </BrowserRouter>
   );
 };
 
