@@ -18,6 +18,24 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      },
+      build: {
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              // Split vendor code
+              'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+              'firebase': ['firebase/app', 'firebase/auth', 'firebase/storage'],
+              'charts': ['recharts'],
+              'icons': ['lucide-react']
+            }
+          }
+        },
+        // Optimize chunk size
+        chunkSizeWarningLimit: 600,
+        // Use esbuild minifier (faster and built-in)
+        minify: 'esbuild',
+        target: 'es2015' // Better mobile compatibility
       }
     };
 });

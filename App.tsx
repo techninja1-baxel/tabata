@@ -1,18 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import Layout from './components/Layout';
-import Dashboard from './pages/Dashboard';
-import Clients from './pages/Clients';
-import ClientDetail from './pages/ClientDetail';
-import Schedule from './pages/Schedule';
-import Subscription from './pages/Subscription';
-import FutureFeatures from './pages/FutureFeatures';
-import Help from './pages/Help';
 import { Client, UserProfile, ClientSession } from './types';
 import { signInWithGoogle, signOut, onAuthChange, handleRedirectResult } from './services/firebaseService';
 import { StorageService, logUsageStats } from './services/storageService';
 import { Lock, Cloud, Loader2, Code2 } from 'lucide-react';
 import { ENABLE_GOOGLE_LOGIN } from './config';
+
+// Lazy load pages for better performance
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Clients = lazy(() => import('./pages/Clients'));
+const ClientDetail = lazy(() => import('./pages/ClientDetail'));
+const Schedule = lazy(() => import('./pages/Schedule'));
+const Subscription = lazy(() => import('./pages/Subscription'));
+const FutureFeatures = lazy(() => import('./pages/FutureFeatures'));
+const Help = lazy(() => import('./pages/Help'));
+
+// Loading component
+const PageLoader = () => (
+  <div className="flex items-center justify-center h-screen bg-gray-900">
+    <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+  </div>
+);
 
 // Wrapper component for ClientDetail that uses URL params
 const ClientDetailWrapper: React.FC<{ clients: Client[]; onUpdateClient: (client: Client) => void }> = ({ clients, onUpdateClient }) => {
@@ -403,34 +412,36 @@ const App: React.FC = () => {
   return (
     <BrowserRouter>
       <Layout onLogout={onLogout} userEmail={user.email}>
-        <Routes>
-          <Route path="/" element={<Dashboard clients={clients} />} />
-          <Route path="/dashboard" element={<Dashboard clients={clients} />} />
-          <Route path="/schedule" element={
-            <Schedule 
-              clients={clients} 
-              onUpdateClient={handleUpdateClient}
-            />
-          } />
-          <Route path="/clients" element={
-            <Clients 
-              clients={clients} 
-              setClients={handleUpdateClients} 
-              onSave={handleUpdateClients}
-            />
-          } />
-          <Route path="/clients/:id" element={
-            <ClientDetailWrapper 
-              clients={clients}
-              onUpdateClient={handleUpdateClient}
-            />
-          } />
-          <Route path="/subscription" element={
-            user ? <Subscription user={user} onUpdateUser={handleUpdateUser} /> : <div>Loading...</div>
-          } />
-          <Route path="/future" element={<FutureFeatures />} />
-          <Route path="/help" element={<Help />} />
-        </Routes>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<Dashboard clients={clients} />} />
+            <Route path="/dashboard" element={<Dashboard clients={clients} />} />
+            <Route path="/schedule" element={
+              <Schedule 
+                clients={clients} 
+                onUpdateClient={handleUpdateClient}
+              />
+            } />
+            <Route path="/clients" element={
+              <Clients 
+                clients={clients} 
+                setClients={handleUpdateClients} 
+                onSave={handleUpdateClients}
+              />
+            } />
+            <Route path="/clients/:id" element={
+              <ClientDetailWrapper 
+                clients={clients}
+                onUpdateClient={handleUpdateClient}
+              />
+            } />
+            <Route path="/subscription" element={
+              user ? <Subscription user={user} onUpdateUser={handleUpdateUser} /> : <PageLoader />
+            } />
+            <Route path="/future" element={<FutureFeatures />} />
+            <Route path="/help" element={<Help />} />
+          </Routes>
+        </Suspense>
       </Layout>
     </BrowserRouter>
   );
