@@ -305,6 +305,29 @@ const App: React.FC = () => {
     }
   };
 
+  const onDeleteAccount = async () => {
+    if (window.confirm('Are you sure you want to delete your account? This will permanently delete all your data from this device and Google Drive. This action cannot be undone.')) {
+      try {
+        const remoteSuccess = await StorageService.deleteAccount();
+        
+        if (!remoteSuccess) {
+          alert('Local data was deleted, but we could not delete your data from Google Drive due to a permission error. You may need to delete the "Tabata Data" folder manually from your Google Drive.');
+        }
+
+        // Clear access token
+        localStorage.removeItem('fittrack_access_token');
+        await signOutGoogleIdentity();
+        setUser(null);
+        setClients([]);
+        setAccessToken(null);
+        StorageService.setCurrentUser(null);
+      } catch (error) {
+        console.error('Failed to delete account', error);
+        alert('Failed to delete account completely. Please try again.');
+      }
+    }
+  };
+
   // --- Rendering ---
 
   // Loading Screen
@@ -437,7 +460,7 @@ const App: React.FC = () => {
 
   return (
     <BrowserRouter>
-      <Layout onLogout={onLogout} onSync={handleSync} isSyncing={isSyncing} userEmail={user?.email}>
+      <Layout onLogout={onLogout} onDeleteAccount={onDeleteAccount} onSync={handleSync} isSyncing={isSyncing} userEmail={user?.email}>
         {/* Sync notification banner */}
         {showSyncBanner && (
           <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-full mx-4">

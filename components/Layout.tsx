@@ -11,18 +11,20 @@ import {
   Dumbbell,
   X,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  Trash2
 } from 'lucide-react';
 
 interface LayoutProps {
   children: React.ReactNode;
   onLogout: () => void;
+  onDeleteAccount?: () => void;
   onSync?: () => void;
   isSyncing?: boolean;
   userEmail?: string;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children, onLogout, onSync, isSyncing, userEmail }) => {
+const Layout: React.FC<LayoutProps> = ({ children, onLogout, onDeleteAccount, onSync, isSyncing, userEmail }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const currentPath = location.pathname;
@@ -189,6 +191,19 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout, onSync, isSyncing, 
                         </>
                       )}
                   </button>
+
+                  {onDeleteAccount && (
+                    <button 
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        onDeleteAccount();
+                      }}
+                      className="w-full flex items-center p-4 rounded-xl text-red-600 font-medium hover:bg-red-50 transition-colors mt-2 border border-transparent hover:border-red-100"
+                    >
+                        <Trash2 size={20} className="mr-3" />
+                        Delete Account
+                    </button>
+                  )}
               </div>
            </div>
         </div>

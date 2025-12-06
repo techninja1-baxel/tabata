@@ -41,6 +41,11 @@ const callDriveAPI = async (endpoint: string, options: RequestInit = {}) => {
     throw new Error(error.error?.message || 'Drive API error');
   }
 
+  // Handle 204 No Content (e.g., DELETE requests)
+  if (response.status === 204) {
+    return null;
+  }
+
   return response.json();
 };
 
@@ -105,6 +110,32 @@ const findDataFile = async (folderId: string): Promise<string | null> => {
   }
 };
 
+// Delete data file from Drive (Soft delete by renaming)
+export const deleteDataFile = async (): Promise<void> => {
+  try {
+    const folderId = await getOrCreateFolder();
+    const fileId = await findDataFile(folderId);
+
+    if (fileId) {
+      // Rename with DELETE prefix and timestamp to "soft delete"
+      // This preserves the data but hides it from the app (which looks for exact name match)
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const newName = `DELETE_${timestamp}_${FILE_NAME}`;
+
+      await callDriveAPI(`files/${fileId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: newName
+        })
+      });
+      cachedFileId = null;
+    }
+  } catch (error) {
+    console.error('Error deleting data file:', error);
+    throw error;
+  }
+};
+
 // Get file metadata (for conflict detection)
 export const getFileMetadata = async (): Promise<{ id: string; modifiedTime: string } | null> => {
   try {
@@ -163,7 +194,7 @@ export const loadFromDrive = async (): Promise<BackupData | null> => {
 };
 
 // Save data to Drive
-export const saveToDrive = async (data: BackupData, retry = true): Promise<void> => {
+export const saveToDrive = async (data: BackupData, retry = true): Promise<string> => {
   try {
     const totalNotes = data.clients.reduce((sum, c) => sum + (c.progressNotes?.length || 0), 0);
     console.log('🚀 saveToDrive called. Total notes to save:', totalNotes);
@@ -172,11 +203,12 @@ export const saveToDrive = async (data: BackupData, retry = true): Promise<void>
     const fileId = await findDataFile(folderId);
 
     const content = JSON.stringify(data, null, 2);
+    let response;
 
     if (fileId) {
       // Update existing file
-      const response = await fetch(
-        `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
+      response = await fetch(
+        `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&fields=id,modifiedTime`,
         {
           method: 'PATCH',
           headers: {
@@ -211,8 +243,8 @@ export const saveToDrive = async (data: BackupData, retry = true): Promise<void>
       });
 
       // Upload content
-      await fetch(
-        `https://www.googleapis.com/upload/drive/v3/files/${fileResponse.id}?uploadType=media`,
+      response = await fetch(
+        `https://www.googleapis.com/upload/drive/v3/files/${fileResponse.id}?uploadType=media&fields=id,modifiedTime`,
         {
           method: 'PATCH',
           headers: {
@@ -224,7 +256,11 @@ export const saveToDrive = async (data: BackupData, retry = true): Promise<void>
       );
     }
 
+    const responseData = await response.json();
     console.log('✅ Data saved to Google Drive. Total notes saved:', totalNotes);
+    
+    // Return the modifiedTime from the response, or current time as fallback
+    return responseData.modifiedTime || new Date().toISOString();
   } catch (error: any) {
     console.error('❌ Error saving to Drive:', error);
     if (retry && (error.message?.includes('404') || error.message?.includes('File not found'))) {

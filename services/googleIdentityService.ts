@@ -29,6 +29,7 @@ export const initializeGoogleIdentity = (): Promise<void> => {
         client_id: GOOGLE_CLIENT_ID,
         scope: SCOPES,
         callback: '', // Will be set per request
+        prompt: 'consent', // Force consent screen to ensure scopes are granted
       });
       
       console.log('✅ Google Identity Services initialized');

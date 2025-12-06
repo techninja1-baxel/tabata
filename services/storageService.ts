@@ -1,10 +1,11 @@
 import { Client, UserProfile } from '../types';
-import { loadFromDrive, saveToDrive, setAccessToken, getFileMetadata } from './googleDriveService';
+import { loadFromDrive, saveToDrive, setAccessToken, getFileMetadata, deleteDataFile } from './googleDriveService';
 import { ENABLE_GOOGLE_LOGIN } from '../config';
 
 const STORAGE_KEY_CLIENTS = 'fittrack_clients';
 const STORAGE_KEY_USER = 'fittrack_user';
 const STORAGE_KEY_SYNCED = 'fittrack_last_synced';
+const STORAGE_KEY_DRIVE_SYNC = 'fittrack_last_drive_sync';
 const STORAGE_KEY_ACCESS_TOKEN = 'fittrack_access_token';
 
 let isOnline = false;
@@ -90,6 +91,15 @@ export const StorageService = {
         if (driveData && driveData.clients) {
           localStorage.setItem(STORAGE_KEY_CLIENTS, JSON.stringify(driveData.clients));
           localStorage.setItem(STORAGE_KEY_SYNCED, new Date().toISOString());
+          
+          // Update base sync time
+          const metadata = await getFileMetadata();
+          if (metadata) {
+            localStorage.setItem(STORAGE_KEY_DRIVE_SYNC, metadata.modifiedTime);
+          } else {
+            localStorage.setItem(STORAGE_KEY_DRIVE_SYNC, new Date().toISOString());
+          }
+
           const totalNotes = driveData.clients.reduce((sum: number, c: Client) => sum + (c.progressNotes?.length || 0), 0);
           console.log('✅ Loaded from Drive. Clients:', driveData.clients.length, 'Total notes:', totalNotes);
           return driveData.clients;
@@ -110,25 +120,52 @@ export const StorageService = {
     
     try {
       console.log('🔄 Background sync from Drive...');
-      const driveData = await loadFromDrive();
-      if (driveData && driveData.clients) {
-        const stored = localStorage.getItem(STORAGE_KEY_CLIENTS);
-        const localClients = stored ? JSON.parse(stored) : [];
+      
+      // Check metadata first to see if we actually need to sync
+      const metadata = await getFileMetadata();
+      const lastDriveSync = localStorage.getItem(STORAGE_KEY_DRIVE_SYNC);
+      const localSynced = localStorage.getItem(STORAGE_KEY_SYNCED);
+      
+      if (metadata) {
+        const driveTime = new Date(metadata.modifiedTime).getTime();
         
-        const driveTimestamp = new Date(driveData.lastUpdated).getTime();
-        const localTimestamp = localStorage.getItem(STORAGE_KEY_SYNCED);
-        
-        if (localTimestamp) {
-          const localTime = new Date(localTimestamp).getTime();
-          if (localTime > driveTimestamp) {
-            console.log('✅ Local data is newer, no sync needed');
+        if (lastDriveSync) {
+          const lastSyncTime = new Date(lastDriveSync).getTime();
+          // If Drive file hasn't changed since our last sync, do nothing
+          if (driveTime <= lastSyncTime + 1000) {
+            console.log('✅ Local data is up to date with Drive');
+            return;
+          }
+        } else if (localSynced) {
+          // Fallback: If we have no sync record, check if local save is newer
+          const localTime = new Date(localSynced).getTime();
+          if (localTime > driveTime + 5000) {
+            console.log('✅ Local data appears newer (fallback check), skipping download');
+            // We assume we are ahead, so we'll let the next save update Drive
             return;
           }
         }
+      }
+
+      // Drive is newer (or we have no record), download it
+      const driveData = await loadFromDrive();
+      if (driveData && driveData.clients) {
+        console.log('📥 Downloading newer data from Drive...');
         
-        // Drive is newer, update localStorage
         localStorage.setItem(STORAGE_KEY_CLIENTS, JSON.stringify(driveData.clients));
         localStorage.setItem(STORAGE_KEY_SYNCED, new Date().toISOString());
+        
+        // Update base sync time
+        if (metadata) {
+          localStorage.setItem(STORAGE_KEY_DRIVE_SYNC, metadata.modifiedTime);
+        } else {
+          // Fallback if metadata fetch failed but load succeeded (unlikely)
+          localStorage.setItem(STORAGE_KEY_DRIVE_SYNC, new Date().toISOString());
+        }
+        
+        // Notify app of update
+        window.dispatchEvent(new CustomEvent('clients-updated'));
+        
         console.log('✅ Background sync completed');
       }
     } catch (error) {
@@ -142,25 +179,34 @@ export const StorageService = {
     
     try {
       console.log('🔍 Checking Drive for updates...');
-      const driveData = await loadFromDrive();
-      if (driveData && driveData.clients) {
-        const localTimestamp = localStorage.getItem(STORAGE_KEY_SYNCED);
-        const driveTimestamp = new Date(driveData.lastUpdated).getTime();
+      
+      const metadata = await getFileMetadata();
+      const lastDriveSync = localStorage.getItem(STORAGE_KEY_DRIVE_SYNC);
+      const localSynced = localStorage.getItem(STORAGE_KEY_SYNCED);
+      
+      if (metadata) {
+        const driveTime = new Date(metadata.modifiedTime).getTime();
         
-        if (localTimestamp) {
-          const localTime = new Date(localTimestamp).getTime();
-          if (driveTimestamp > localTime) {
-            console.log('📥 Newer data found on Drive');
-            return driveData.clients;
+        if (lastDriveSync) {
+          const lastSyncTime = new Date(lastDriveSync).getTime();
+          if (driveTime <= lastSyncTime + 1000) {
+            console.log('✅ Local data is up to date');
+            return null;
           }
-        } else {
-          // No local sync timestamp, Drive data is available
-          console.log('📥 Drive data available');
-          return driveData.clients;
+        } else if (localSynced) {
+           const localTime = new Date(localSynced).getTime();
+           if (localTime > driveTime + 5000) {
+             console.log('✅ Local data appears newer (fallback check)');
+             return null;
+           }
         }
       }
-      console.log('✅ Local data is up to date');
-      return null;
+
+      // If we get here, Drive is newer or we have no sync record
+      console.log('📥 Newer data found on Drive');
+      const driveData = await loadFromDrive();
+      return driveData ? driveData.clients : null;
+
     } catch (error) {
       console.error('Failed to check Drive for updates:', error);
       return null;
@@ -207,19 +253,35 @@ export const StorageService = {
         try {
           // Check for conflicts first
           const metadata = await getFileMetadata();
-          const lastSynced = localStorage.getItem(STORAGE_KEY_SYNCED);
+          const lastDriveSync = localStorage.getItem(STORAGE_KEY_DRIVE_SYNC);
+          const localSynced = localStorage.getItem(STORAGE_KEY_SYNCED);
           
-          if (metadata && lastSynced) {
+          console.log('🤔 Conflict Check:', {
+            serverTime: metadata?.modifiedTime,
+            localBaseTime: lastDriveSync,
+            localSaveTime: localSynced,
+            diff: metadata && lastDriveSync ? new Date(metadata.modifiedTime).getTime() - new Date(lastDriveSync).getTime() : 'N/A'
+          });
+
+          if (metadata) {
             const driveTime = new Date(metadata.modifiedTime).getTime();
-            const localTime = new Date(lastSynced).getTime();
+            let lastSyncTime = 0;
+
+            if (lastDriveSync) {
+              lastSyncTime = new Date(lastDriveSync).getTime();
+            } else if (localSynced) {
+              // Fallback: use local save time if we have no sync record
+              // This handles the case where user just updated the app
+              lastSyncTime = new Date(localSynced).getTime();
+            }
             
             // If Drive file is newer than our last sync, we have a conflict
             // Note: We add a small buffer (e.g., 5 seconds) to account for clock skew/network delay
-            if (driveTime > localTime + 5000) {
+            if (driveTime > lastSyncTime + 5000) {
               console.warn('⚠️ Conflict detected! Drive data is newer.');
               window.dispatchEvent(new CustomEvent('sync-conflict', { 
                 detail: { 
-                  localTime, 
+                  lastSyncTime, 
                   driveTime
                 } 
               }));
@@ -229,11 +291,15 @@ export const StorageService = {
             }
           }
 
-          await saveToDrive({
+          const newModifiedTime = await saveToDrive({
             clients: pendingClients,
             userProfile: StorageService.loadUser(),
             lastUpdated: new Date().toISOString()
           });
+          
+          // Update base sync time on success
+          localStorage.setItem(STORAGE_KEY_DRIVE_SYNC, newModifiedTime);
+          
           console.log('✅ Drive save completed');
           pendingClients = null;
           saveTimeout = null;
@@ -260,11 +326,13 @@ export const StorageService = {
     if (pendingClients && isOnline && accessToken) {
       console.log('🔄 Flushing pending save before exit...');
       try {
-        await saveToDrive({
+        const newModifiedTime = await saveToDrive({
           clients: pendingClients,
           userProfile: StorageService.loadUser(),
           lastUpdated: new Date().toISOString()
         });
+        
+        localStorage.setItem(STORAGE_KEY_DRIVE_SYNC, newModifiedTime);
         console.log('✅ Flushed pending save');
         pendingClients = null;
       } catch (error) {
@@ -287,11 +355,13 @@ export const StorageService = {
       
       if (clientsToSave) {
         try {
-          await saveToDrive({
+          const newModifiedTime = await saveToDrive({
             clients: clientsToSave,
             userProfile: StorageService.loadUser(),
             lastUpdated: new Date().toISOString()
           });
+          
+          localStorage.setItem(STORAGE_KEY_DRIVE_SYNC, newModifiedTime);
           console.log('✅ Retry successful');
           retryDelay = 2000; // Reset delay
           
@@ -299,8 +369,21 @@ export const StorageService = {
           if (failedSaveQueue.length > 0) {
             StorageService.retryFailedSaves();
           }
-        } catch (error) {
+        } catch (error: any) {
           console.error('❌ Retry failed:', error);
+          
+          // Check for auth errors - stop retrying if token is invalid
+          if (error.message && (
+            error.message.includes('401') || 
+            error.message.includes('Unauthorized') ||
+            error.message.includes('invalid authentication credentials')
+          )) {
+             console.warn('🛑 Auth error detected, stopping retries');
+             // Don't clear queue, but stop processing. 
+             // User needs to re-login to process queue.
+             return;
+          }
+
           // Put back in queue
           failedSaveQueue.unshift(clientsToSave);
           // Increase delay (max 30s)
@@ -324,11 +407,12 @@ export const StorageService = {
     if (isOnline && accessToken) {
       try {
         const clients = await StorageService.loadClients();
-        await saveToDrive({
+        const newModifiedTime = await saveToDrive({
           clients,
           userProfile: user,
           lastUpdated: new Date().toISOString(),
         });
+        localStorage.setItem(STORAGE_KEY_DRIVE_SYNC, newModifiedTime);
       } catch (error) {
         console.error('Failed to sync user to Drive:', error);
       }
@@ -349,13 +433,50 @@ export const StorageService = {
     const clients = await StorageService.loadClients();
     const userProfile = StorageService.loadUser();
 
-    await saveToDrive({
+    const newModifiedTime = await saveToDrive({
       clients,
       userProfile,
       lastUpdated: new Date().toISOString(),
     });
 
     localStorage.setItem(STORAGE_KEY_SYNCED, new Date().toISOString());
+    localStorage.setItem(STORAGE_KEY_DRIVE_SYNC, newModifiedTime);
+  },
+
+  // Delete account (local and remote data)
+  deleteAccount: async (): Promise<boolean> => {
+    // Stop any pending saves or retries
+    if (saveTimeout) clearTimeout(saveTimeout);
+    if (retryTimer) clearTimeout(retryTimer);
+    failedSaveQueue = [];
+    pendingClients = null;
+
+    let remoteSuccess = true;
+    
+    // 1. Delete from Drive if connected
+    if (isOnline && accessToken) {
+      try {
+        await deleteDataFile();
+        console.log('✅ Deleted Drive data');
+      } catch (error) {
+        console.error('❌ Failed to delete Drive data:', error);
+        remoteSuccess = false;
+      }
+    }
+
+    // 2. Clear Local Storage
+    localStorage.removeItem(STORAGE_KEY_CLIENTS);
+    localStorage.removeItem(STORAGE_KEY_USER);
+    localStorage.removeItem(STORAGE_KEY_SYNCED);
+    localStorage.removeItem(STORAGE_KEY_DRIVE_SYNC);
+    localStorage.removeItem(STORAGE_KEY_ACCESS_TOKEN);
+    
+    // 3. Reset memory state
+    accessToken = null;
+    lastKnownCount = 0;
+    
+    console.log('✅ Account deleted locally');
+    return remoteSuccess;
   },
 
   // Validate promo code
