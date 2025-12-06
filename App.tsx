@@ -1,8 +1,8 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import Layout from './components/Layout';
 import { Client, UserProfile, ClientSession } from './types';
-import { signInWithGoogle, signOut, onAuthChange, handleRedirectResult } from './services/firebaseService';
+import { initializeGoogleIdentity, signInWithGoogleIdentity, signOutGoogleIdentity, isSignedIn } from './services/googleIdentityService';
 import { StorageService, logUsageStats } from './services/storageService';
 import { Lock, Cloud, Loader2, Code2 } from 'lucide-react';
 import { ENABLE_GOOGLE_LOGIN } from './config';
@@ -52,101 +52,42 @@ const App: React.FC = () => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
 
-  // Initialize storage service and load data when user signs in
-  useEffect(() => {
-    if (user && accessToken) {
-      // Re-initialize storage service when token changes
-      StorageService.initialize(accessToken);
-    }
-  }, [user, accessToken]);
+  // Google Identity Services initialization flag
+  const googleInitializedRef = useRef(false);
 
-  // Check for redirect result on page load
+  // Initialize Google Identity Services on mount
   useEffect(() => {
-    if (ENABLE_GOOGLE_LOGIN) {
-      handleRedirectResult().then((result) => {
-        if (result) {
-          console.log('✅ Sign-in redirect completed successfully');
-          const { userProfile, accessToken: token } = result;
+    if (ENABLE_GOOGLE_LOGIN && !googleInitializedRef.current) {
+      console.log('🔍 Initializing Google Identity Services...');
+      initializeGoogleIdentity()
+        .then(() => {
+          googleInitializedRef.current = true;
+          console.log('✅ Google Identity Services ready');
           
-          // Store access token for Drive operations
-          if (token) {
-            localStorage.setItem('fittrack_access_token', token);
-          }
-          
-          // Initialize storage and load data
-          StorageService.initialize(token);
-          StorageService.loadClients().then((loadedClients) => {
-            setAccessToken(token);
-            setClients(loadedClients);
-            setUser(userProfile);
-            StorageService.setCurrentUser(userProfile);
-            setIsAuthLoading(false);
-          });
-        }
-      }).catch((error) => {
-        console.error('Redirect result error:', error);
-        setAuthError(error.message);
-        setIsAuthLoading(false);
-      });
-    }
-  }, []);
-
-  // Listen for Firebase auth state changes
-  useEffect(() => {
-    if (ENABLE_GOOGLE_LOGIN) {
-      const unsubscribe = onAuthChange(async (firebaseUser) => {
-        if (firebaseUser) {
-          // Load stored access token FIRST
+          // Check for existing session
           const storedToken = localStorage.getItem('fittrack_access_token');
-          
-          // If no token in localStorage (incognito/new session), we need to wait for explicit login
-          // Don't auto-restore session without Drive access token
-          if (!storedToken) {
-            console.log('⚠️ No access token found - user needs to sign in again');
-            setUser(null);
-            setClients([]);
-            setAccessToken(null);
-            setIsAuthLoading(false);
-            return;
-          }
-          
-          const userProfile: UserProfile = {
-            name: firebaseUser.displayName || 'User',
-            email: firebaseUser.email || '',
-            photoUrl: firebaseUser.photoURL || undefined,
-            isSubscribed: false,
-          };
-          
-          // Load stored subscription status from localStorage
           const storedUser = StorageService.loadUser();
-          if (storedUser) {
-            userProfile.isSubscribed = storedUser.isSubscribed;
-            userProfile.promoCode = storedUser.promoCode;
+          
+          if (storedToken && storedUser) {
+            console.log('🔄 Restoring previous session...');
+            setAccessToken(storedToken);
+            StorageService.initialize(storedToken);
+            StorageService.loadClients().then((loadedClients) => {
+              setClients(loadedClients);
+              setUser(storedUser);
+              setIsAuthLoading(false);
+              console.log('✅ Session restored');
+            });
+          } else {
+            setIsAuthLoading(false);
           }
-          
-          // Initialize storage with token
-          setAccessToken(storedToken);
-          StorageService.initialize(storedToken);
-          
-          // Load data from Drive/localStorage
-          console.log('🔄 Restoring session - loading data...');
-          const loadedClients = await StorageService.loadClients();
-          console.log(`✅ Session restored with ${loadedClients.length} clients`);
-          
-          // Now set user and clients
-          setClients(loadedClients);
-          setUser(userProfile);
-          StorageService.setCurrentUser(userProfile);
-        } else {
-          setUser(null);
-          setClients([]);
-          setAccessToken(null);
-        }
-        setIsAuthLoading(false);
-      });
-
-      return () => unsubscribe();
-    } else {
+        })
+        .catch((error) => {
+          console.error('❌ Failed to initialize Google Identity Services:', error);
+          setAuthError('Failed to initialize Google Sign-In');
+          setIsAuthLoading(false);
+        });
+    } else if (!ENABLE_GOOGLE_LOGIN) {
       // Developer mode
       const mockUser: UserProfile = {
         name: 'Dev Trainer',
@@ -165,6 +106,8 @@ const App: React.FC = () => {
       setIsAuthLoading(false);
     }
   }, []);
+
+
 
   // Check for expired schedules periodically
   useEffect(() => {
@@ -229,7 +172,7 @@ const App: React.FC = () => {
 
   const saveData = (newClients: Client[], newUser: UserProfile) => {
     setClients(newClients);
-    setUser(newUser);
+    setUserState(newUser);
     
     // Save using StorageService (will handle both localStorage and Drive)
     StorageService.saveClients(newClients);
@@ -250,36 +193,36 @@ const App: React.FC = () => {
   const onGoogleLogin = async () => {
     try {
       setAuthError(null);
-      const { userProfile, accessToken: token } = await signInWithGoogle();
+      setIsAuthLoading(true);
       
-      // Store access token for Drive operations FIRST
-      if (token) {
-        localStorage.setItem('fittrack_access_token', token);
-      }
+      const { userProfile, accessToken: token } = await signInWithGoogleIdentity();
       
-      // Initialize storage with token BEFORE setting user
+      console.log('✅ Sign-in succeeded, user:', userProfile.email);
+      
+      // Store access token
+      localStorage.setItem('fittrack_access_token', token);
+      console.log('✅ Access token saved to localStorage');
+      
+      // Initialize storage with token
       StorageService.initialize(token);
       
-      // Load data from Drive/localStorage BEFORE setting user state
-      console.log('🔄 Loading user data before login completion...');
+      // Load data from Drive/localStorage
+      console.log('🔄 Loading user data...');
       const loadedClients = await StorageService.loadClients();
       console.log(`✅ Loaded ${loadedClients.length} clients from storage`);
       
-      // Now set state - this will trigger UI to show
+      // Set state
       setAccessToken(token);
       setClients(loadedClients);
       setUser(userProfile);
       StorageService.setCurrentUser(userProfile);
+      setIsAuthLoading(false);
       
       logUsageStats('User Logged In');
     } catch (err: any) {
-      console.error(err);
-      // Show different message if it's a redirect
-      if (err.message?.includes('Redirecting')) {
-        setAuthError("Redirecting to Google sign-in...");
-      } else {
-        setAuthError("Login failed. If you're on mobile or popups are blocked, the page will redirect automatically.");
-      }
+      console.error('❌ Login error:', err);
+      setAuthError(err.message || 'Login failed. Please try again.');
+      setIsAuthLoading(false);
     }
   };
 
@@ -299,7 +242,7 @@ const App: React.FC = () => {
       // Clear access token
       localStorage.removeItem('fittrack_access_token');
       
-      await signOut();
+      await signOutGoogleIdentity();
       setUser(null);
       setClients([]);
       setAccessToken(null);
