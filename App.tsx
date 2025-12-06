@@ -51,6 +51,11 @@ const App: React.FC = () => {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  
+  // Sync notification state
+  const [showSyncBanner, setShowSyncBanner] = useState(false);
+  const [pendingDriveData, setPendingDriveData] = useState<Client[] | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Google Identity Services initialization flag
   const googleInitializedRef = useRef(false);
@@ -58,34 +63,43 @@ const App: React.FC = () => {
   // Initialize Google Identity Services on mount
   useEffect(() => {
     if (ENABLE_GOOGLE_LOGIN && !googleInitializedRef.current) {
+      // Check for existing session FIRST (instant)
+      const storedToken = localStorage.getItem('fittrack_access_token');
+      const storedUser = StorageService.loadUser();
+      
+      if (storedToken && storedUser) {
+        // Restore session instantly
+        console.log('⚡ Instant session restore');
+        setAccessToken(storedToken);
+        setUser(storedUser);
+        setIsAuthLoading(false);
+        StorageService.initialize(storedToken);
+        
+        // Load clients from localStorage immediately
+        const stored = localStorage.getItem('fittrack_clients');
+        if (stored) {
+          try {
+            const localClients = JSON.parse(stored);
+            setClients(localClients);
+            console.log('⚡ Instant client data loaded:', localClients.length);
+          } catch (e) {
+            console.error('Failed to parse local clients:', e);
+          }
+        }
+      } else {
+        setIsAuthLoading(false);
+      }
+      
+      // Initialize Google Identity Services in background (non-blocking)
       console.log('🔍 Initializing Google Identity Services...');
       initializeGoogleIdentity()
         .then(() => {
           googleInitializedRef.current = true;
           console.log('✅ Google Identity Services ready');
-          
-          // Check for existing session
-          const storedToken = localStorage.getItem('fittrack_access_token');
-          const storedUser = StorageService.loadUser();
-          
-          if (storedToken && storedUser) {
-            console.log('🔄 Restoring previous session...');
-            setAccessToken(storedToken);
-            StorageService.initialize(storedToken);
-            StorageService.loadClients().then((loadedClients) => {
-              setClients(loadedClients);
-              setUser(storedUser);
-              setIsAuthLoading(false);
-              console.log('✅ Session restored');
-            });
-          } else {
-            setIsAuthLoading(false);
-          }
         })
         .catch((error) => {
           console.error('❌ Failed to initialize Google Identity Services:', error);
           setAuthError('Failed to initialize Google Sign-In');
-          setIsAuthLoading(false);
         });
     } else if (!ENABLE_GOOGLE_LOGIN) {
       // Developer mode
@@ -105,6 +119,34 @@ const App: React.FC = () => {
       StorageService.setCurrentUser(mockUser);
       setIsAuthLoading(false);
     }
+  }, []);
+
+  // Listen for service events
+  useEffect(() => {
+    const handleTokenExpired = () => {
+      console.log('⚠️ Token expired event received');
+      onLogout();
+    };
+
+    const handleSyncConflict = (event: CustomEvent) => {
+      console.log('⚠️ Sync conflict event received', event.detail);
+      alert('Sync Conflict: Remote data is newer. Please refresh to load latest data.');
+    };
+    
+    const handleTokenRefreshed = (event: CustomEvent) => {
+      console.log('✅ Token refreshed event received');
+      setAccessToken(event.detail.token);
+    };
+
+    window.addEventListener('token-expired', handleTokenExpired as EventListener);
+    window.addEventListener('sync-conflict', handleSyncConflict as EventListener);
+    window.addEventListener('token-refreshed', handleTokenRefreshed as EventListener);
+
+    return () => {
+      window.removeEventListener('token-expired', handleTokenExpired as EventListener);
+      window.removeEventListener('sync-conflict', handleSyncConflict as EventListener);
+      window.removeEventListener('token-refreshed', handleTokenRefreshed as EventListener);
+    };
   }, []);
 
 
@@ -172,7 +214,7 @@ const App: React.FC = () => {
 
   const saveData = (newClients: Client[], newUser: UserProfile) => {
     setClients(newClients);
-    setUserState(newUser);
+    setUser(newUser);
     
     // Save using StorageService (will handle both localStorage and Drive)
     StorageService.saveClients(newClients);
@@ -206,17 +248,27 @@ const App: React.FC = () => {
       // Initialize storage with token
       StorageService.initialize(token);
       
-      // Load data from Drive/localStorage
-      console.log('🔄 Loading user data...');
-      const loadedClients = await StorageService.loadClients();
-      console.log(`✅ Loaded ${loadedClients.length} clients from storage`);
-      
-      // Set state
+      // Set state immediately (login is instant)
       setAccessToken(token);
-      setClients(loadedClients);
       setUser(userProfile);
       StorageService.setCurrentUser(userProfile);
       setIsAuthLoading(false);
+      
+      // Load data from localStorage immediately (synchronous)
+      const stored = localStorage.getItem('fittrack_clients');
+      if (stored) {
+        try {
+          const localClients = JSON.parse(stored);
+          setClients(localClients);
+          console.log(`⚡ Loaded ${localClients.length} clients instantly`);
+        } catch (e) {
+          console.error('Failed to parse clients:', e);
+          setClients([]);
+        }
+      } else {
+        console.log('📥 No local data, will load from Drive on first save');
+        setClients([]);
+      }
       
       logUsageStats('User Logged In');
     } catch (err: any) {
@@ -230,13 +282,14 @@ const App: React.FC = () => {
 
   const onLogout = async () => {
     try {
-      // Save current clients data before logging out
+      // Save to localStorage immediately, Drive sync happens in background
       if (clients.length > 0 && user) {
-        console.log('💾 Saving data before logout...');
-        await StorageService.saveClients(clients);
-        // Wait a bit to ensure Drive sync completes
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        console.log('✅ Data saved successfully');
+        console.log('💾 Saving data to localStorage...');
+        localStorage.setItem('fittrack_clients', JSON.stringify(clients));
+        // Background save to Drive (non-blocking)
+        StorageService.saveClients(clients).catch(err => 
+          console.error('Background Drive save failed:', err)
+        );
       }
       
       // Clear access token
@@ -351,10 +404,66 @@ const App: React.FC = () => {
     const newClients = clients.map(c => c.id === updated.id ? updated : c);
     handleUpdateClients(newClients);
   };
+  
+  const handleLoadDriveData = () => {
+    if (pendingDriveData) {
+      setClients(pendingDriveData);
+      localStorage.setItem('fittrack_clients', JSON.stringify(pendingDriveData));
+      localStorage.setItem('fittrack_last_synced', new Date().toISOString());
+      setPendingDriveData(null);
+      setShowSyncBanner(false);
+      console.log('✅ Drive data loaded successfully');
+    }
+  };
+
+  const handleSync = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    try {
+      console.log('🔄 Manual sync requested');
+      await StorageService.syncFromDrive();
+      // Also check for updates
+      const updates = await StorageService.checkDriveForUpdates();
+      if (updates) {
+        setPendingDriveData(updates);
+        setShowSyncBanner(true);
+      }
+    } catch (error) {
+      console.error('Manual sync failed:', error);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   return (
     <BrowserRouter>
-      <Layout onLogout={onLogout} userEmail={user.email}>
+      <Layout onLogout={onLogout} onSync={handleSync} isSyncing={isSyncing} userEmail={user?.email}>
+        {/* Sync notification banner */}
+        {showSyncBanner && (
+          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-full mx-4">
+            <div className="bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Cloud className="w-5 h-5" />
+                <span className="text-sm font-medium">New data available from Drive</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleLoadDriveData}
+                  className="px-3 py-1 bg-white text-blue-600 rounded text-sm font-medium hover:bg-blue-50 transition-colors"
+                >
+                  Load
+                </button>
+                <button
+                  onClick={() => setShowSyncBanner(false)}
+                  className="px-3 py-1 text-white hover:bg-blue-700 rounded text-sm font-medium transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/" element={<Dashboard clients={clients} />} />

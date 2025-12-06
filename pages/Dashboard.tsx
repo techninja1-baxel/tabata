@@ -94,7 +94,7 @@ const Dashboard: React.FC<DashboardProps> = ({ clients }) => {
           </div>
           <div className="h-40 w-full flex items-center">
             <div className="h-full w-1/2">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <PieChart>
                     <Pie
                     data={sessionDistribution}

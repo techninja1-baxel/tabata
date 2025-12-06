@@ -10,16 +10,19 @@ import {
   HelpCircle,
   Dumbbell,
   X,
-  Loader2
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 
 interface LayoutProps {
   children: React.ReactNode;
   onLogout: () => void;
+  onSync?: () => void;
+  isSyncing?: boolean;
   userEmail?: string;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children, onLogout, userEmail }) => {
+const Layout: React.FC<LayoutProps> = ({ children, onLogout, onSync, isSyncing, userEmail }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const currentPath = location.pathname;
@@ -72,8 +75,20 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout, userEmail }) => {
       {/* Top Header */}
       <header className="flex-none bg-white border-b border-slate-200 px-4 py-3 flex justify-between items-center shadow-sm z-20">
         <h1 className="text-xl font-black text-slate-900 tracking-tight italic">{getPageTitle()}</h1>
-        <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold text-sm border border-emerald-200">
-           {userEmail ? userEmail[0].toUpperCase() : 'U'}
+        <div className="flex items-center space-x-3">
+          {onSync && (
+            <button 
+              onClick={onSync} 
+              disabled={isSyncing}
+              className={`p-2 rounded-full text-slate-500 hover:bg-slate-100 ${isSyncing ? 'animate-spin' : ''}`}
+              aria-label="Sync now"
+            >
+              <RefreshCw size={20} />
+            </button>
+          )}
+          <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold text-sm border border-emerald-200">
+             {userEmail ? userEmail[0].toUpperCase() : 'U'}
+          </div>
         </div>
       </header>
 

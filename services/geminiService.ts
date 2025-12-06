@@ -6,6 +6,11 @@ const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 export const generateTrainingPlan = async (focus: string[], duration: string, clientName: string, notes: string): Promise<PlanSession[]> => {
   try {
+    // Check if API key is configured
+    if (!GEMINI_API_KEY || GEMINI_API_KEY === '') {
+      throw new Error('Gemini API key is not configured. Please add VITE_GEMINI_API_KEY to your environment variables.');
+    }
+    
     // 1. Optimization: Move Persona to System Instruction
     // This pre-loads the context, allowing the model to focus immediately on the task.
     const systemInstruction = "You are an elite Strength and Conditioning Coach with a PhD in Sports Science. You create highly specific, safe, and effective training plans. You communicate in structured JSON only.";
@@ -26,7 +31,7 @@ export const generateTrainingPlan = async (focus: string[], duration: string, cl
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash-exp',
       contents: prompt,
       config: {
         systemInstruction: systemInstruction,

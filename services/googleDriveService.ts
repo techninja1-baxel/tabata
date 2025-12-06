@@ -10,9 +10,16 @@ interface BackupData {
 }
 
 let accessToken: string | null = null;
+let cachedFolderId: string | null = null;
+let cachedFileId: string | null = null;
 
 export const setAccessToken = (token: string) => {
   accessToken = token;
+};
+
+export const invalidateCache = () => {
+  cachedFolderId = null;
+  cachedFileId = null;
 };
 
 const callDriveAPI = async (endpoint: string, options: RequestInit = {}) => {
@@ -39,6 +46,11 @@ const callDriveAPI = async (endpoint: string, options: RequestInit = {}) => {
 
 // Find or create the app folder
 const getOrCreateFolder = async (): Promise<string> => {
+  // Return cached folder ID if available
+  if (cachedFolderId) {
+    return cachedFolderId;
+  }
+  
   try {
     // Search for existing folder
     const query = `name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
@@ -47,7 +59,8 @@ const getOrCreateFolder = async (): Promise<string> => {
     );
 
     if (response.files && response.files.length > 0) {
-      return response.files[0].id;
+      cachedFolderId = response.files[0].id;
+      return cachedFolderId;
     }
 
     // Create folder if it doesn't exist
@@ -59,7 +72,8 @@ const getOrCreateFolder = async (): Promise<string> => {
       }),
     });
 
-    return createResponse.id;
+    cachedFolderId = createResponse.id;
+    return cachedFolderId;
   } catch (error) {
     console.error('Error getting/creating folder:', error);
     throw error;
@@ -68,6 +82,11 @@ const getOrCreateFolder = async (): Promise<string> => {
 
 // Find the data file in the folder
 const findDataFile = async (folderId: string): Promise<string | null> => {
+  // Return cached file ID if available
+  if (cachedFileId) {
+    return cachedFileId;
+  }
+  
   try {
     const query = `name='${FILE_NAME}' and '${folderId}' in parents and trashed=false`;
     const response = await callDriveAPI(
@@ -75,12 +94,35 @@ const findDataFile = async (folderId: string): Promise<string | null> => {
     );
 
     if (response.files && response.files.length > 0) {
-      return response.files[0].id;
+      cachedFileId = response.files[0].id;
+      return cachedFileId;
     }
 
     return null;
   } catch (error) {
     console.error('Error finding data file:', error);
+    return null;
+  }
+};
+
+// Get file metadata (for conflict detection)
+export const getFileMetadata = async (): Promise<{ id: string; modifiedTime: string } | null> => {
+  try {
+    const folderId = await getOrCreateFolder();
+    const fileId = await findDataFile(folderId);
+
+    if (!fileId) return null;
+
+    const response = await callDriveAPI(
+      `files/${fileId}?fields=id,modifiedTime`
+    );
+
+    return {
+      id: response.id,
+      modifiedTime: response.modifiedTime
+    };
+  } catch (error) {
+    console.error('Error getting file metadata:', error);
     return null;
   }
 };
@@ -121,7 +163,7 @@ export const loadFromDrive = async (): Promise<BackupData | null> => {
 };
 
 // Save data to Drive
-export const saveToDrive = async (data: BackupData): Promise<void> => {
+export const saveToDrive = async (data: BackupData, retry = true): Promise<void> => {
   try {
     const totalNotes = data.clients.reduce((sum, c) => sum + (c.progressNotes?.length || 0), 0);
     console.log('🚀 saveToDrive called. Total notes to save:', totalNotes);
@@ -146,6 +188,11 @@ export const saveToDrive = async (data: BackupData): Promise<void> => {
       );
 
       if (!response.ok) {
+        if (response.status === 404 && retry) {
+          console.log('⚠️ 404 detected during save, invalidating cache and retrying...');
+          invalidateCache();
+          return saveToDrive(data, false);
+        }
         const error = await response.json();
         throw new Error(error.error?.message || 'Failed to update file');
       }
@@ -178,8 +225,13 @@ export const saveToDrive = async (data: BackupData): Promise<void> => {
     }
 
     console.log('✅ Data saved to Google Drive. Total notes saved:', totalNotes);
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ Error saving to Drive:', error);
+    if (retry && (error.message?.includes('404') || error.message?.includes('File not found'))) {
+      console.log('⚠️ 404 detected (catch), invalidating cache and retrying...');
+      invalidateCache();
+      return saveToDrive(data, false);
+    }
     throw error;
   }
 };

@@ -7,8 +7,13 @@ declare global {
   }
 }
 
+interface TokenData {
+  token: string;
+  expiresAt: number; // Unix timestamp
+}
+
 let tokenClient: any = null;
-let accessToken: string | null = null;
+let tokenData: TokenData | null = null;
 
 // Initialize Google Identity Services
 export const initializeGoogleIdentity = (): Promise<void> => {
@@ -54,13 +59,23 @@ export const signInWithGoogleIdentity = (): Promise<{ userProfile: UserProfile; 
       }
 
       console.log('✅ Got access token');
-      accessToken = tokenResponse.access_token;
+      
+      // Store token with expiration
+      const expiresIn = tokenResponse.expires_in || 3600; // Default 1 hour
+      tokenData = {
+        token: tokenResponse.access_token,
+        expiresAt: Date.now() + (expiresIn * 1000) - 60000, // 1 min buffer
+      };
+      
+      // Persist to localStorage
+      localStorage.setItem('fittrack_token_data', JSON.stringify(tokenData));
+      localStorage.setItem('fittrack_access_token', tokenData.token); // Keep for compatibility
 
       try {
         // Get user info from Google
         const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${tokenData.token}`,
           },
         });
 
@@ -78,40 +93,143 @@ export const signInWithGoogleIdentity = (): Promise<{ userProfile: UserProfile; 
           isSubscribed: false,
         };
 
-        resolve({ userProfile, accessToken: accessToken! });
+        resolve({ userProfile, accessToken: tokenData!.token });
       } catch (error: any) {
         console.error('❌ Failed to get user info:', error);
         reject(error);
       }
     };
 
-    // Request access token
-    tokenClient.requestAccessToken({ prompt: 'consent' });
+    // Request access token (prompt only if needed)
+    tokenClient.requestAccessToken({ prompt: '' });
   });
+};
+
+// Refresh token
+const refreshToken = async (): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    if (!tokenClient) {
+      reject(new Error('Token client not initialized'));
+      return;
+    }
+    
+    console.log('🔄 Refreshing token...');
+    
+    // Store original callback to restore later if needed, 
+    // but here we just overwrite it for the refresh flow
+    tokenClient.callback = async (tokenResponse: any) => {
+      if (tokenResponse.error) {
+        console.error('❌ Refresh token error:', tokenResponse.error);
+        reject(new Error(tokenResponse.error));
+        return;
+      }
+      
+      const expiresIn = tokenResponse.expires_in || 3600;
+      tokenData = {
+        token: tokenResponse.access_token,
+        expiresAt: Date.now() + (expiresIn * 1000) - 60000,
+      };
+      
+      localStorage.setItem('fittrack_token_data', JSON.stringify(tokenData));
+      localStorage.setItem('fittrack_access_token', tokenData.token);
+      
+      console.log('✅ Token refreshed successfully');
+      
+      // Emit event for UI to update
+      window.dispatchEvent(new CustomEvent('token-refreshed', { detail: { token: tokenData.token } }));
+      
+      resolve();
+    };
+    
+    // Request new token silently (no prompt)
+    tokenClient.requestAccessToken({ prompt: '' });
+  });
+};
+
+// Get current access token (with automatic refresh)
+export const getAccessToken = async (): Promise<string | null> => {
+  if (!tokenData) {
+    // Try to restore from localStorage
+    const stored = localStorage.getItem('fittrack_token_data');
+    if (stored) {
+      try {
+        tokenData = JSON.parse(stored);
+      } catch (e) {
+        console.error('Failed to parse token data:', e);
+        localStorage.removeItem('fittrack_token_data');
+        return null;
+      }
+    } else {
+      // Fallback to simple token if data not found (migration path)
+      const simpleToken = localStorage.getItem('fittrack_access_token');
+      if (simpleToken) {
+        // We don't know expiration, so assume valid for now but expire soon
+        tokenData = {
+          token: simpleToken,
+          expiresAt: Date.now() + 3600000 // Assume 1 hour from now
+        };
+      }
+    }
+  }
+  
+  // Check if token is expired
+  if (tokenData && Date.now() >= tokenData.expiresAt) {
+    console.log('⚠️ Token expired, refreshing...');
+    try {
+      await refreshToken();
+    } catch (error) {
+      console.error('❌ Failed to refresh token:', error);
+      // Clear expired token
+      tokenData = null;
+      localStorage.removeItem('fittrack_token_data');
+      localStorage.removeItem('fittrack_access_token');
+      
+      // Emit event for UI to handle
+      window.dispatchEvent(new CustomEvent('token-expired'));
+      return null;
+    }
+  }
+  
+  return tokenData?.token || null;
+};
+
+// Get token synchronously (for compatibility)
+export const getAccessTokenSync = (): string | null => {
+  return tokenData?.token || localStorage.getItem('fittrack_access_token');
 };
 
 // Sign out
 export const signOutGoogleIdentity = (): Promise<void> => {
   return new Promise((resolve) => {
-    if (accessToken && window.google?.accounts?.oauth2) {
-      window.google.accounts.oauth2.revoke(accessToken, () => {
-        console.log('✅ Access token revoked');
-        accessToken = null;
-        resolve();
-      });
-    } else {
-      accessToken = null;
+    const token = tokenData?.token || localStorage.getItem('fittrack_access_token');
+    
+    const clearLocal = () => {
+      tokenData = null;
+      localStorage.removeItem('fittrack_token_data');
+      localStorage.removeItem('fittrack_access_token');
       resolve();
+    };
+
+    if (token && window.google?.accounts?.oauth2) {
+      try {
+        window.google.accounts.oauth2.revoke(token, () => {
+          console.log('✅ Access token revoked');
+          clearLocal();
+        });
+      } catch (e) {
+        console.error('Error revoking token:', e);
+        clearLocal();
+      }
+    } else {
+      clearLocal();
     }
   });
 };
 
-// Get current access token
-export const getAccessToken = (): string | null => {
-  return accessToken;
-};
-
 // Check if user is currently signed in
 export const isSignedIn = (): boolean => {
-  return accessToken !== null;
+  if (tokenData) {
+    return Date.now() < tokenData.expiresAt;
+  }
+  return !!localStorage.getItem('fittrack_access_token');
 };

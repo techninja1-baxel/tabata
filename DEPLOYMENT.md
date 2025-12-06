@@ -17,31 +17,31 @@ Name: AZURE_WEBAPP_PUBLISH_PROFILE
 Value: [Get from Azure Portal - App Service → Deployment Center → Manage publish profile → Download]
 
 Name: VITE_FIREBASE_API_KEY
-Value: AIzaSyCoAnn5vy9u-CSN41_tXlrDyxCjxCSgSmU
+Value: [YOUR_FIREBASE_API_KEY]
 
 Name: VITE_FIREBASE_AUTH_DOMAIN
-Value: tabata-16abd.firebaseapp.com
+Value: [YOUR_FIREBASE_AUTH_DOMAIN]
 
 Name: VITE_FIREBASE_PROJECT_ID
-Value: tabata-16abd
+Value: [YOUR_FIREBASE_PROJECT_ID]
 
 Name: VITE_FIREBASE_STORAGE_BUCKET
-Value: tabata-16abd.firebasestorage.app
+Value: [YOUR_FIREBASE_STORAGE_BUCKET]
 
 Name: VITE_FIREBASE_MESSAGING_SENDER_ID
-Value: 76986387784
+Value: [YOUR_FIREBASE_MESSAGING_SENDER_ID]
 
 Name: VITE_FIREBASE_APP_ID
-Value: 1:76986387784:web:2c8fc9aacaef0d87d3b77d
+Value: [YOUR_FIREBASE_APP_ID]
 
 Name: VITE_GOOGLE_CLIENT_ID
-Value: 76986387784-kfbgq24v3h0i3pfj7eqrq5p7f79s4eja.apps.googleusercontent.com
+Value: [YOUR_GOOGLE_CLIENT_ID]
 
 Name: VITE_GOOGLE_API_KEY
-Value: AIzaSyCoAnn5vy9u-CSN41_tXlrDyxCjxCSgSmU
+Value: [YOUR_GOOGLE_API_KEY]
 
 Name: VITE_GEMINI_API_KEY
-Value: AIzaSyCf1t9GOWhXRJN4Hderc5BQYwpB-kRRfKc
+Value: [YOUR_GEMINI_API_KEY]
 ```
 
 #### 2. Get Publish Profile
